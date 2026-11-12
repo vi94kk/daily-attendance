@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>每日签到表 | Daily Attendance</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;color:#152136;background:#f3f6fb}*{box-sizing:border-box}body{margin:0}.shell{max-width:840px;margin:28px auto;padding:0 16px}header{background:#16385b;color:white;padding:24px;border-radius:17px}h1{font-size:1.5rem;margin:0 0 6px}h2{font-size:1.18rem;margin:0 0 16px}.subtitle{opacity:.85;margin:0}.tabs{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}button{cursor:pointer;font:inherit;border-radius:9px;padding:11px 15px;border:1px solid #c9d4df;background:white;color:#153453;font-weight:600}button.primary{background:#1461b0;color:white;border-color:#1461b0}button.danger{color:#b91c1c}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #82b8fa}button[disabled]{opacity:.5;cursor:not-allowed}.tabs button.active{background:#16385b;color:white}.panel{background:white;border:1px solid #dce3ea;border-radius:16px;padding:20px;margin:14px 0;box-shadow:0 2px 8px #1c36500a}.muted{color:#62758a;font-size:.88rem}.note{padding:12px 14px;background:#fff7df;color:#6b4d0b;border:1px solid #f2e1a2;border-radius:9px;line-height:1.5}.field{display:flex;flex-direction:column;gap:6px;flex:1;min-width:190px}.field label{font-weight:600;font-size:.89rem}.field input,.field select{border:1px solid #b8c8d8;border-radius:8px;padding:11px;font:inherit;width:100%;background:white;color:#17293d}.flex{display:flex;gap:12px;flex-wrap:wrap}.worker{border:1px solid #d7e0e8;border-radius:12px;padding:14px;margin:12px 0;background:#fafcff}.worker-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.hidden{display:none!important}.status{margin:12px 0;font-weight:600}.ok{color:#197149}.bad{color:#b42318}table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid #e5eaf1;white-space:nowrap}.tablewrap{overflow:auto}.summary{font-weight:700;padding:12px 0}.rowline{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid #e6edf4;padding:12px 0;flex-wrap:wrap}.tiny{font-size:.8rem}footer{margin:24px 0;text-align:center;color:#677b8d;font-size:.78rem}@media(max-width:480px){.shell{margin:0 auto;padding:0 10px}header{border-radius:0 0 15px 15px}.panel{padding:15px}.field{min-width:100%}.actions button{flex:1}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header><h1>每日员工签到表 / Daily Attendance</h1><p class="subtitle">一天一张表 · One sheet per day</p></header>
+<div class="panel note"><strong>第一版 / Version 1:</strong> 数据仅保存在当前浏览器 / Records are saved only in this browser. 其他人的手机不会自动同步 / Other phones won't see these entries. 请定期导出备份 / Export backups regularly.</div>
+<nav class="tabs" aria-label="Navigation"><button id="tab-entry" class="active" onclick="showTab('entry')">填写签到 / Entry</button><button id="tab-history" onclick="showTab('history')">历史数据 / History</button></nav>
+<section id="entry" class="panel">
+<h2>每日签到 / Daily Sheet</h2>
+<div class="flex"><div class="field"><label for="date">工作日期 / Work Date *</label><input type="date" id="date"></div><div class="field"><label for="recorder">记录人 / Recorded By *</label><input id="recorder" placeholder="English full name" autocomplete="off"></div></div>
+<div class="muted" style="margin-top:12px">姓名仅允许英文手动输入，不提供姓名推荐。/ Names must be typed manually in English; no suggestions.</div>
+<div id="workers"></div>
+<div class="actions"><button onclick="addWorker()">+ 添加员工 / Add Worker</button></div>
+<div id="total" class="summary">0 workers · 0.00 hours</div>
+<div id="entryStatus" class="status" role="status"></div>
+<div class="actions"><button class="primary" onclick="saveSheet()">保存当天整张表 / Save Daily Sheet</button><button onclick="newBlank()">清空编辑 / Clear Form</button></div>
+</section>
+<section id="history" class="panel hidden">
+<h2>历史签到表 / Saved Daily Sheets</h2>
+<div id="sheetList"></div>
+<div id="details"></div>
+<div class="actions"><button onclick="exportCSV()">导出全部 CSV / Export All CSV</button><button onclick="backupJSON()">备份 JSON / Backup Data</button><button onclick="document.getElementById('importFile').click()">导入备份 / Import Backup</button><input class="hidden" type="file" id="importFile" accept=".json,application/json" onchange="importBackup(event)"></div>
+<div id="historyStatus" class="status" role="status"></div>
+</section>
+<footer>Daily Attendance · Local prototype · No server / 无服务器</footer>
+</div>
+<script>
+'use strict';
+const KEY='daily-attendance-v1';
+let sheets={};let workers=[];let nextId=1;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const getMinutes=t=>{const [h,m]=t.split(':').map(Number);return h*60+m};
+const getHours=w=>{if(!w.start||!w.end)return 0;let minutes=getMinutes(w.end)-getMinutes(w.start);if(w.overnight&&minutes<=0)minutes+=1440;return minutes>0?minutes/60:0};
+function load(){try{const v=JSON.parse(localStorage.getItem(KEY)||'{}');sheets=v&&typeof v==='object'&&!Array.isArray(v)?v:{}}catch{sheets={}}}
+function persist(){try{localStorage.setItem(KEY,JSON.stringify(sheets));return true}catch{message('entryStatus','无法保存：请检查浏览器的存储权限 / Browser storage is unavailable',false);return false}}
+function message(id,s,ok=true){$(id).className='status '+(ok?'ok':'bad');$(id).textContent=s}
+function showTab(which){$('entry').classList.toggle('hidden',which!=='entry');$('history').classList.toggle('hidden',which!=='history');$('tab-entry').classList.toggle('active',which==='entry');$('tab-history').classList.toggle('active',which==='history');if(which==='history')renderHistory()}
+function addWorker(w={}){workers.push({id:nextId++,name:w.name||'',start:w.start||'',end:w.end||'',overnight:!!w.overnight});renderWorkers()}
+function change(id,key,val){const w=workers.find(x=>x.id===id);if(w){w[key]=val;updateTotal()}}
+function removeWorker(id){workers=workers.filter(w=>w.id!==id);renderWorkers()}
+function renderWorkers(){const el=$('workers');el.innerHTML=workers.map((w,i)=>`<div class="worker"><div class="worker-head"><strong>员工 ${i+1} / Worker ${i+1}</strong><button type="button" class="danger" data-remove="${w.id}">删除 / Remove</button></div><div class="field"><label>员工英文全名 / English Full Name *</label><input data-id="${w.id}" data-k="name" value="${esc(w.name)}" placeholder="Type full name" autocomplete="off" spellcheck="false"></div><div class="flex" style="margin-top:12px"><div class="field"><label>上班时间 / Clock In *</label><input type="time" step="60" data-id="${w.id}" data-k="start" value="${esc(w.start)}"></div><div class="field"><label>下班时间 / Clock Out *</label><input type="time" step="60" data-id="${w.id}" data-k="end" value="${esc(w.end)}"></div></div><label class="tiny" style="display:block;margin-top:12px"><input type="checkbox" data-id="${w.id}" data-k="overnight" ${w.overnight?'checked':''}> 跨夜下班 / Clock Out Next Day</label></div>`).join('');updateTotal()}
+$('workers').addEventListener('input',e=>{const id=Number(e.target.dataset.id),key=e.target.dataset.k;if(key&&key!=='overnight')change(id,key,e.target.value)});
+$('workers').addEventListener('change',e=>{const id=Number(e.target.dataset.id),key=e.target.dataset.k;if(key)change(id,key,key==='overnight'?e.target.checked:e.target.value)});
+$('workers').addEventListener('click',e=>{const b=e.target.closest('[data-remove]');if(b)removeWorker(Number(b.dataset.remove))});
+function updateTotal(){$('total').textContent=`${workers.length} 位员工 / Workers · ${workers.reduce((s,w)=>s+getHours(w),0).toFixed(2)} 工时 / Hours`}
+function newBlank(){workers=[];addWorker();$('entryStatus').textContent=''}
+function validName(s){return /^[A-Za-z][A-Za-z .'-]*$/.test(s.trim())}
+function saveSheet(){const date=$('date').value,recorder=$('recorder').value.trim();if(!date||!validName(recorder)){message('entryStatus','请填写日期和记录人英文姓名 / Enter date and recorder name',false);return}if(!workers.length){message('entryStatus','请至少添加一名员工 / Add at least one worker',false);return}for(const [i,w] of workers.entries()){if(!validName(w.name)||!w.start||!w.end||getHours(w)<=0||getHours(w)>24){message('entryStatus',`第 ${i+1} 位员工信息有误 / Invalid name or times for worker ${i+1}`,false);return}}
+if(sheets[date]&&!confirm('将更新这一天已有的签到表。继续吗？ / Replace the existing sheet for this date?'))return;
+const previous=sheets[date];sheets[date]={date,recorder,workers:workers.map(w=>({name:w.name.trim(),start:w.start,end:w.end,overnight:w.overnight})),updatedAt:new Date().toISOString(),createdAt:previous?.createdAt||new Date().toISOString()};if(persist())message('entryStatus','已保存到当前浏览器 / Saved in this browser')}
+function renderHistory(){const keys=Object.keys(sheets).sort().reverse();$('sheetList').innerHTML=keys.length?keys.map(date=>`<div class="rowline"><div><strong>${esc(date)}</strong><div class="muted">${sheets[date].workers.length} workers · ${esc(sheets[date].recorder)}</div></div><div class="actions" style="margin:0"><button data-view="${esc(date)}">查看 / View</button><button data-edit="${esc(date)}">编辑 / Edit</button></div></div>`).join(''):'<p class="muted">暂无数据 / No records yet</p>';$('details').innerHTML=''}
+$('sheetList').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.view)viewSheet(b.dataset.view);if(b.dataset.edit)editSheet(b.dataset.edit)});
+function viewSheet(date){const s=sheets[date];if(!s)return;const sum=s.workers.reduce((n,w)=>n+getHours(w),0);$('details').innerHTML=`<div style="margin-top:22px"><h2>${esc(date)} / Daily Sheet</h2><p class="muted">记录人 / Recorded By: ${esc(s.recorder)}</p><div class="tablewrap"><table><thead><tr><th>姓名 / Name</th><th>上班 / In</th><th>下班 / Out</th><th>工时 / Hours</th></tr></thead><tbody>${s.workers.map(w=>`<tr><td>${esc(w.name)}</td><td>${esc(w.start)}</td><td>${esc(w.end)}${w.overnight?' +1 day':''}</td><td>${getHours(w).toFixed(2)}</td></tr>`).join('')}</tbody></table></div><p class="summary">${s.workers.length} workers · ${sum.toFixed(2)} hours</p></div>`}
+function editSheet(date){const s=sheets[date];if(!s)return;$('date').value=date;$('recorder').value=s.recorder;workers=[];for(const w of s.workers)addWorker(w);showTab('entry');message('entryStatus','正在编辑已有签到表 / Editing existing sheet')}
+function download(filename,data,mime){const blob=new Blob([data],{type:mime});const link=document.createElement('a');const url=URL.createObjectURL(blob);link.href=url;link.download=filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function exportCSV(){const out=[['Work Date','Recorded By','Employee Full Name','Clock In','Clock Out','Next Day','Hours']];for(const d of Object.keys(sheets).sort())for(const w of sheets[d].workers)out.push([d,sheets[d].recorder,w.name,w.start,w.end,w.overnight?'Yes':'No',getHours(w).toFixed(2)]);const csv='\uFEFF'+out.map(row=>row.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');download('attendance-records.csv',csv,'text/csv;charset=utf-8');message('historyStatus','CSV 已导出 / CSV exported')}
+function backupJSON(){download('attendance-backup.json',JSON.stringify(sheets,null,2),'application/json');message('historyStatus','备份已下载 / Backup downloaded')}
+async function importBackup(event){const f=event.target.files?.[0];event.target.value='';if(!f)return;try{const data=JSON.parse(await f.text());if(!data||typeof data!=='object'||Array.isArray(data)||Object.entries(data).some(([d,s])=>!/^\d{4}-\d{2}-\d{2}$/.test(d)||!s||!Array.isArray(s.workers)||typeof s.recorder!=='string'||s.workers.some(w=>typeof w.name!=='string'||!validName(w.name)||!/^\d{2}:\d{2}$/.test(w.start)||!/^\d{2}:\d{2}$/.test(w.end)||getHours(w)<=0||getHours(w)>24)))throw Error('Invalid backup');if(!confirm('导入将替换此浏览器全部已有数据。继续吗？ / Replace all local records with this backup?'))return;const old=sheets;sheets=data;if(!persist()){sheets=old;return}renderHistory();message('historyStatus','备份已导入 / Backup imported')}catch{message('historyStatus','文件格式不正确 / Invalid backup file',false)}}
+load();$('date').value=new Date().toLocaleDateString('en-CA');addWorker();
+</script>
+</body></html>
